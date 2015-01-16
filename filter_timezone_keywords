@@ -1,0 +1,90 @@
+from multiprocessing import Pool
+import json, os, bz2, re
+from unicodedata import normalize
+from pprint import pprint
+ 
+def get_string( input ):
+  if type( input ) is type(None):
+    return 'NA'
+  else:
+    if type( input ) is type( unicode( 'a' ) ):
+      return normalize( 'NFKD', input ).encode( 'ascii', 'ignore' )
+    else:
+      return str( input )
+ 
+def load_file( file ):
+    f = open( file, 'r' )
+    raw_data = bz2.decompress( f.read() )
+    raw_data = raw_data.split('\r\n')
+    f.close()
+    tweets = []
+    for line in raw_data:
+        try:
+            tweets.append( json.loads( line ) )
+        except ValueError:
+            pass
+    return tweets
+ 
+def check_for_string( to_check, allowed_list ):
+    check = False
+    for word in allowed_list:
+        word_re = re.compile( word, re.IGNORECASE )
+        if len( word_re.findall( to_check ) ) > 0:
+            check = True
+            break
+    return check
+ 
+def write_tweets( tweets, filename ):
+    w = open( filename, 'w' )
+    for tweet in tweets:
+        w.write( json.dumps( tweet ) )
+        w.write( '\n' )
+    w.close()
+   
+def get_filter_filename( file ):    
+    return '-'.join( file.split('/') ).split('.json.bz2')[0] + '-filter.json'
+ 
+def get_geo_filename( file ):
+    return '-'.join( file.split('/') ).split('.json.bz2')[0] + '-geo.json'
+ 
+def filter_tweets( file ):
+    allowed_time_zones = [ 'Alaska', 'CST', 'Central', 'EST', 'Eastern', 'Indiana', 'Mountain', 'PST', 'Pacific' ]
+    allowed_keywords = [  ]
+    tweets = load_file( file )
+    tweets = [ tweet for tweet in tweets if 'user' in tweet.keys() ]
+    filtered_tweets = []
+    geo_tweets = []
+    for tweet in tweets:
+        try:
+            if check_for_string( get_string( tweet['user']['time_zone'] ), allowed_time_zones ):
+                if check_for_string( get_string( tweet['text'] ), allowed_keywords ):
+                    filtered_tweets.append( tweet )
+            if check_for_string( get_string( tweet['user']['time_zone'] ), ['Pacific','PST'] ):
+                if type( tweet['coordinates'] ) != type(None):
+                    if tweet['coordinates']['coordinates'][0] >= -126 and tweet['coordinates']['coordinates'][0] <= -120:
+                        geo_tweets.append( tweet )
+                       
+        except KeyError:
+            print 'Error'
+            print file
+    if len( filtered_tweets ) > 0:
+        write_tweets( filtered_tweets, os.path.join( 'output', get_filter_filename( file ) ) )
+    if len( geo_tweets ) > 0:
+        write_tweets( geo_tweets, os.path.join( 'output', get_geo_filename( file ) ) )
+ 
+def main():
+  tar_files = [ file for file in os.listdir('.') if file.endswith('.tar') ]
+  for file in tar_files:
+    os.system( 'tar -C tweets -xf ' + file )
+    print file
+  print 'Done with untarring. Start filtering now'
+  zip_files = [ os.path.join( root, file ) for root, sub_dir, files in os.walk('tweets') for file in files if file.endswith( '.bz2' ) ]
+  pool = Pool()
+  pool.map( filter_tweets, zip_files )
+  pool.close()
+  pool.join()
+ 
+ 
+if __name__ == '__main__':
+  main()
+
